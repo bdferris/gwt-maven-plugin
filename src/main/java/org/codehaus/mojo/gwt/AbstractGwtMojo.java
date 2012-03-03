@@ -171,6 +171,11 @@ public abstract class AbstractGwtMojo
      * @since 2.1.0-1
      */
     protected boolean gwtSdkFirstInClasspath;
+    
+    /**
+     * @parameter default-value="false" expression="${gwt.detectLocalSourceFolders}"
+     */
+    protected boolean detectLocalSourceFolders;
 
     public File getOutputDirectory()
     {
@@ -230,6 +235,7 @@ public abstract class AbstractGwtMojo
     {
         try
         {
+            classpathBuilder.setDetectLocalSourceFolders(detectLocalSourceFolders);
             Collection<File> files = classpathBuilder.buildClasspathList( getProject(), scope, getProjectArtifacts() );
 
             if ( getLog().isDebugEnabled() )

@@ -48,6 +48,12 @@ import org.codehaus.plexus.logging.AbstractLogEnabled;
 public class ClasspathBuilder
     extends AbstractLogEnabled
 {
+  
+    protected boolean detectLocalSourceFolders = false;
+    
+    public void setDetectLocalSourceFolders(boolean detectLocalSourceFolders) {
+      this.detectLocalSourceFolders = detectLocalSourceFolders;
+    }
 
     /**
      * Build classpath list using either gwtHome (if present) or using *project* dependencies. Note that this is ONLY
@@ -77,6 +83,7 @@ public class ClasspathBuilder
         // addSourceWithActiveProject would make some java sources available to GWT compiler that should not be accessible in
         // a non-reactor build, making the build less deterministic and encouraging bad design.
 
+        //addSourcesWithActiveProjects(project, items, scope);
         addSources( items, project.getCompileSourceRoots() );
         addResources( items, project.getResources() );
         items.add( new File( project.getBuild().getOutputDirectory() ) );
@@ -94,6 +101,7 @@ public class ClasspathBuilder
             for ( Artifact artifact : artifacts )
             {
                 items.add( artifact.getFile() );
+                detectLocalProjectForArtifact(project, scope, artifact, items);
             }
         }
         else if ( scope.equals( SCOPE_COMPILE ) )
@@ -107,6 +115,7 @@ public class ClasspathBuilder
                     || SCOPE_SYSTEM.equals( artifactScope ) )
                 {
                     items.add( artifact.getFile() );
+                    detectLocalProjectForArtifact(project, scope, artifact, items);
                 }
             }
         }
@@ -120,6 +129,7 @@ public class ClasspathBuilder
                 if ( !artifact.getScope().equals( SCOPE_TEST ) && artifact.getArtifactHandler().isAddedToClasspath() )
                 {
                     items.add( artifact.getFile() );
+                    detectLocalProjectForArtifact(project, scope, artifact, items);
                 }
             }
         }
@@ -303,5 +313,47 @@ public class ClasspathBuilder
     private String getProjectReferenceId( final String groupId, final String artifactId, final String version )
     {
         return groupId + ":" + artifactId + ":" + version;
+    }
+    
+    /**
+     *  
+     * @param project TODO
+     * @param scope TODO
+     * @param artifact
+     * @param items
+     */
+    private void detectLocalProjectForArtifact(MavenProject project, String scope, Artifact artifact, Set<File> items)
+    {
+      if (detectLocalSourceFolders)
+      {
+        /**
+         * Look for a reactor project reference
+         */
+        String projectReferenceId =
+            getProjectReferenceId( artifact.getGroupId(), artifact.getArtifactId(), artifact.getVersion() );
+        MavenProject refProject = (MavenProject) project.getProjectReferences().get( projectReferenceId );
+        if ( refProject != null )
+        {
+            addSources( items, getSourceRoots( refProject, scope ) );
+        }
+        else {
+            /**
+             * If we don't find a reactor project, check to see if we have a local reference anyway.
+             * This is often the case when run from within Eclipse.
+             */
+            File path = artifact.getFile();
+            String absPath = path.getAbsolutePath();
+            String suffix = "target/classes";
+            if( path.isDirectory() && absPath.endsWith(suffix))
+            {
+                String projectPath = absPath.substring(0,absPath.length() - suffix.length());
+                File sourcePath = new File(projectPath, "src/main/java");
+                if( sourcePath.isDirectory() )
+                {
+                    items.add(sourcePath);
+                }
+            }
+        }
+      }
     }
 }
