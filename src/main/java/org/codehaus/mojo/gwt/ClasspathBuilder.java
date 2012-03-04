@@ -28,8 +28,10 @@ import static org.apache.maven.artifact.Artifact.SCOPE_TEST;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import org.apache.maven.artifact.Artifact;
@@ -50,9 +52,10 @@ public class ClasspathBuilder
 {
   
     protected boolean detectLocalSourceFolders = false;
-    
-    public void setDetectLocalSourceFolders(boolean detectLocalSourceFolders) {
-      this.detectLocalSourceFolders = detectLocalSourceFolders;
+
+    public void setDetectLocalSourceFolders( boolean detectLocalSourceFolders )
+    {
+        this.detectLocalSourceFolders = detectLocalSourceFolders;
     }
 
     /**
@@ -76,14 +79,15 @@ public class ClasspathBuilder
         getLogger().debug( "establishing classpath list (scope = " + scope + ")" );
 
         Set<File> items = new LinkedHashSet<File>();
-
+        Map<String, MavenProject> transitiveProjectReferences = new HashMap<String, MavenProject>();
+        collectTransitiveProjectReferences( project, transitiveProjectReferences );
+        
         // Note : Don't call addSourceWithActiveProject as a GWT dependency MUST be a valid GWT library module :
         // * include java sources in the JAR as resources
         // * define a gwt.xml module file to declare the required inherits
         // addSourceWithActiveProject would make some java sources available to GWT compiler that should not be accessible in
         // a non-reactor build, making the build less deterministic and encouraging bad design.
 
-        //addSourcesWithActiveProjects(project, items, scope);
         addSources( items, project.getCompileSourceRoots() );
         addResources( items, project.getResources() );
         items.add( new File( project.getBuild().getOutputDirectory() ) );
@@ -100,8 +104,8 @@ public class ClasspathBuilder
             // Add all project dependencies in classpath
             for ( Artifact artifact : artifacts )
             {
+                detectLocalProjectForArtifact(transitiveProjectReferences, scope, artifact, items);
                 items.add( artifact.getFile() );
-                detectLocalProjectForArtifact(project, scope, artifact, items);
             }
         }
         else if ( scope.equals( SCOPE_COMPILE ) )
@@ -114,8 +118,8 @@ public class ClasspathBuilder
                 if ( SCOPE_COMPILE.equals( artifactScope ) || SCOPE_PROVIDED.equals( artifactScope )
                     || SCOPE_SYSTEM.equals( artifactScope ) )
                 {
+                    detectLocalProjectForArtifact(transitiveProjectReferences, scope, artifact, items);
                     items.add( artifact.getFile() );
-                    detectLocalProjectForArtifact(project, scope, artifact, items);
                 }
             }
         }
@@ -128,8 +132,8 @@ public class ClasspathBuilder
                 getLogger().debug( "candidate artifact : " + artifact );
                 if ( !artifact.getScope().equals( SCOPE_TEST ) && artifact.getArtifactHandler().isAddedToClasspath() )
                 {
+                    detectLocalProjectForArtifact(transitiveProjectReferences, scope, artifact, items);
                     items.add( artifact.getFile() );
-                    detectLocalProjectForArtifact(project, scope, artifact, items);
                 }
             }
         }
@@ -314,46 +318,65 @@ public class ClasspathBuilder
     {
         return groupId + ":" + artifactId + ":" + version;
     }
-    
+
+    private void collectTransitiveProjectReferences( MavenProject project, Map<String, MavenProject> allReferences )
+    {
+        @SuppressWarnings( "unchecked" )
+        Map<String, MavenProject> projectReferences = project.getProjectReferences();
+        allReferences.putAll( projectReferences );
+        for ( MavenProject referencedProject : projectReferences.values() )
+        {
+            collectTransitiveProjectReferences( referencedProject, allReferences );
+        }
+    }
+
     /**
      *  
-     * @param project TODO
+     * @param transitiveProjectReferences TODO
      * @param scope TODO
      * @param artifact
      * @param items
      */
-    private void detectLocalProjectForArtifact(MavenProject project, String scope, Artifact artifact, Set<File> items)
+    private void detectLocalProjectForArtifact( Map<String, MavenProject> transitiveProjectReferences, String scope,
+                                                Artifact artifact, Set<File> items )
     {
-      if (detectLocalSourceFolders)
-      {
-        /**
-         * Look for a reactor project reference
-         */
-        String projectReferenceId =
-            getProjectReferenceId( artifact.getGroupId(), artifact.getArtifactId(), artifact.getVersion() );
-        MavenProject refProject = (MavenProject) project.getProjectReferences().get( projectReferenceId );
-        if ( refProject != null )
+        if ( detectLocalSourceFolders )
         {
-            addSources( items, getSourceRoots( refProject, scope ) );
-        }
-        else {
             /**
-             * If we don't find a reactor project, check to see if we have a local reference anyway.
-             * This is often the case when run from within Eclipse.
+             * Look for a reactor project reference
              */
-            File path = artifact.getFile();
-            String absPath = path.getAbsolutePath();
-            String suffix = "target/classes";
-            if( path.isDirectory() && absPath.endsWith(suffix))
+            String projectReferenceId =
+                getProjectReferenceId( artifact.getGroupId(), artifact.getArtifactId(), artifact.getVersion() );
+            MavenProject refProject = (MavenProject) transitiveProjectReferences.get( projectReferenceId );
+            if ( refProject != null )
             {
-                String projectPath = absPath.substring(0,absPath.length() - suffix.length());
-                File sourcePath = new File(projectPath, "src/main/java");
-                if( sourcePath.isDirectory() )
+                addSources( items, getSourceRoots( refProject, scope ) );
+                addResources( items, getResources( refProject, scope ) );
+            }
+            else
+            {
+                /**
+                 * If we don't find a reactor project, check to see if we have a local reference anyway. This is often
+                 * the case when run from within Eclipse.
+                 */
+                File path = artifact.getFile();
+                String absPath = path.getAbsolutePath();
+                String suffix = "/target/classes";
+                if ( path.isDirectory() && absPath.endsWith( suffix ) )
                 {
-                    items.add(sourcePath);
+                    String projectPath = absPath.substring( 0, absPath.length() - suffix.length() );
+                    File sourcePath = new File( projectPath, "src/main/java" );
+                    if ( sourcePath.isDirectory() )
+                    {
+                        items.add( sourcePath );
+                    }
+                    File resourcePath = new File( projectPath, "src/main/resources" );
+                    if ( resourcePath.isDirectory() )
+                    {
+                        items.add( resourcePath );
+                    }
                 }
             }
         }
-      }
     }
 }
